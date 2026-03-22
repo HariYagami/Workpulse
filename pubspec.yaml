@@ -1,0 +1,47 @@
+name: presenceiq
+description: Workspace Attendance and Decision System
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Firebase
+  firebase_core: ^2.32.0
+  firebase_auth: ^4.20.0
+  cloud_firestore: ^4.17.5
+  firebase_messaging: ^14.7.10
+
+  # State Management
+  flutter_riverpod: ^2.4.10
+  riverpod_annotation: ^2.3.4
+
+  # Navigation
+  go_router: ^13.2.0
+  google_sign_in: ^6.2.1        # added ^ prefix (was pinned without it)
+
+  # UI & Fonts
+  google_fonts: ^6.2.1
+  cupertino_icons: ^1.0.6
+
+  # Bottom Navigation
+  google_nav_bar: ^5.0.6
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.1
+  build_runner: ^2.4.8
+  riverpod_generator: ^2.3.11
+
+# ← CRITICAL FIX: forces patched Android Google Sign-In plugin
+dependency_overrides:
+  google_sign_in_android: ^6.1.25
+
+flutter:
+  uses-material-design: true
+  assets:
