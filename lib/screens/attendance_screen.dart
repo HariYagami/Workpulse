@@ -7,7 +7,8 @@ import '../models/organization_model.dart';
 class AttendanceScreen extends StatefulWidget {
   final bool embedded;
   final String orgId;
-  const AttendanceScreen({super.key, this.embedded = false, this.orgId = ''});
+  const AttendanceScreen(
+      {super.key, this.embedded = false, this.orgId = ''});
 
   @override
   State<AttendanceScreen> createState() => _AttendanceScreenState();
@@ -46,18 +47,23 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       return;
     }
     try {
-      final doc = await _db.collection('organizations').doc(widget.orgId).get();
+      final doc = await _db
+          .collection('organizations')
+          .doc(widget.orgId)
+          .get();
       final data = doc.data() as Map<String, dynamic>?;
       if (data != null) {
         final start = data['workingStart'] as String?;
         final end = data['workingEnd'] as String?;
         if (start != null) {
           final p = start.split(':');
-          _startTime = TimeOfDay(hour: int.parse(p[0]), minute: int.parse(p[1]));
+          _startTime =
+              TimeOfDay(hour: int.parse(p[0]), minute: int.parse(p[1]));
         }
         if (end != null) {
           final p = end.split(':');
-          _endTime = TimeOfDay(hour: int.parse(p[0]), minute: int.parse(p[1]));
+          _endTime =
+              TimeOfDay(hour: int.parse(p[0]), minute: int.parse(p[1]));
         }
       }
     } catch (_) {}
@@ -66,7 +72,10 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
 
   Future<void> _saveWorkingHours() async {
     if (widget.orgId.isEmpty) return;
-    await _db.collection('organizations').doc(widget.orgId).update({
+    await _db
+        .collection('organizations')
+        .doc(widget.orgId)
+        .update({
       'workingStart':
           '${_startTime.hour.toString().padLeft(2, '0')}:${_startTime.minute.toString().padLeft(2, '0')}',
       'workingEnd':
@@ -90,7 +99,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       context: context,
       backgroundColor: AppColors.white,
       shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+          borderRadius:
+              BorderRadius.vertical(top: Radius.circular(24))),
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSheet) => Padding(
           padding: const EdgeInsets.all(24),
@@ -163,7 +173,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     }
 
     final weekFilter = Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding:
+          const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(10),
@@ -188,7 +199,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           : AppBar(
               title: const Text('Attendance'),
               leading: IconButton(
-                icon: const Icon(Icons.arrow_back_ios_rounded, size: 18),
+                icon: const Icon(Icons.arrow_back_ios_rounded,
+                    size: 18),
                 onPressed: () => Navigator.pop(context),
               ),
               actions: [
@@ -225,7 +237,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                 if (widget.embedded) ...[
                   Row(children: [
                     Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                        crossAxisAlignment:
+                            CrossAxisAlignment.start,
                         children: [
                           Text('Attendance',
                               style: GoogleFonts.inter(
@@ -236,7 +249,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                           Text('Weekly hours per staff',
                               style: GoogleFonts.inter(
                                   fontSize: 13,
-                                  color: AppColors.textSecondary)),
+                                  color:
+                                      AppColors.textSecondary)),
                         ]),
                     const Spacer(),
                     weekFilter,
@@ -247,6 +261,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                 const SizedBox(height: 20),
                 _buildSummaryRow(members),
                 const SizedBox(height: 24),
+                _buildLegend(),
+                const SizedBox(height: 12),
                 _buildDayHeaders(),
                 const SizedBox(height: 12),
                 if (members.isEmpty)
@@ -294,22 +310,25 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                 color: AppColors.pastelBlueDark, size: 20),
           ),
           const SizedBox(width: 14),
-          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Working Hours',
-                style: GoogleFonts.inter(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textPrimary)),
-            const SizedBox(height: 2),
-            Text(
-                '${_formatTime(_startTime)}  –  ${_formatTime(_endTime)}',
-                style: GoogleFonts.inter(
-                    fontSize: 12, color: AppColors.textSecondary)),
-          ]),
+          Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Working Hours',
+                    style: GoogleFonts.inter(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textPrimary)),
+                const SizedBox(height: 2),
+                Text(
+                    '${_formatTime(_startTime)}  –  ${_formatTime(_endTime)}',
+                    style: GoogleFonts.inter(
+                        fontSize: 12,
+                        color: AppColors.textSecondary)),
+              ]),
           const Spacer(),
           Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            padding: const EdgeInsets.symmetric(
+                horizontal: 12, vertical: 6),
             decoration: BoxDecoration(
               color: AppColors.surface,
               borderRadius: BorderRadius.circular(8),
@@ -334,17 +353,19 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           decoration: BoxDecoration(
               color: AppColors.mint,
               borderRadius: BorderRadius.circular(14)),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Staff Members',
-                style: GoogleFonts.inter(
-                    fontSize: 12, color: AppColors.mintDark)),
-            const SizedBox(height: 4),
-            Text('${members.length}',
-                style: GoogleFonts.inter(
-                    fontSize: 24,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.mintDark)),
-          ]),
+          child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Staff Members',
+                    style: GoogleFonts.inter(
+                        fontSize: 12, color: AppColors.mintDark)),
+                const SizedBox(height: 4),
+                Text('${members.length}',
+                    style: GoogleFonts.inter(
+                        fontSize: 24,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.mintDark)),
+              ]),
         ),
       ),
       const SizedBox(width: 12),
@@ -354,17 +375,20 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           decoration: BoxDecoration(
               color: AppColors.pastelBlue,
               borderRadius: BorderRadius.circular(14)),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Start Time',
-                style: GoogleFonts.inter(
-                    fontSize: 12, color: AppColors.pastelBlueDark)),
-            const SizedBox(height: 4),
-            Text(_formatTime(_startTime),
-                style: GoogleFonts.inter(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.pastelBlueDark)),
-          ]),
+          child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Start Time',
+                    style: GoogleFonts.inter(
+                        fontSize: 12,
+                        color: AppColors.pastelBlueDark)),
+                const SizedBox(height: 4),
+                Text(_formatTime(_startTime),
+                    style: GoogleFonts.inter(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.pastelBlueDark)),
+              ]),
         ),
       ),
       const SizedBox(width: 12),
@@ -374,19 +398,48 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           decoration: BoxDecoration(
               color: AppColors.peach,
               borderRadius: BorderRadius.circular(14)),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('End Time',
-                style: GoogleFonts.inter(
-                    fontSize: 12, color: AppColors.peachDark)),
-            const SizedBox(height: 4),
-            Text(_formatTime(_endTime),
-                style: GoogleFonts.inter(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.peachDark)),
-          ]),
+          child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('End Time',
+                    style: GoogleFonts.inter(
+                        fontSize: 12, color: AppColors.peachDark)),
+                const SizedBox(height: 4),
+                Text(_formatTime(_endTime),
+                    style: GoogleFonts.inter(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.peachDark)),
+              ]),
         ),
       ),
+    ]);
+  }
+
+  // ── Legend ────────────────────────────────────────────────────────────────
+  Widget _buildLegend() {
+    return Row(children: [
+      _legendDot(AppColors.mint, AppColors.mintDark, 'Present & Done'),
+      const SizedBox(width: 14),
+      _legendDot(
+          AppColors.pastelBlue, AppColors.pastelBlueDark, 'Clocked In'),
+      const SizedBox(width: 14),
+      _legendDot(
+          AppColors.peach.withOpacity(0.5), AppColors.peachDark, 'Absent'),
+    ]);
+  }
+
+  Widget _legendDot(Color bg, Color fg, String label) {
+    return Row(children: [
+      Container(
+          width: 10,
+          height: 10,
+          decoration:
+              BoxDecoration(color: bg, shape: BoxShape.circle)),
+      const SizedBox(width: 5),
+      Text(label,
+          style: GoogleFonts.inter(
+              fontSize: 11, color: AppColors.textSecondary)),
     ]);
   }
 
@@ -457,8 +510,8 @@ class _MemberAttendanceCard extends StatelessWidget {
     return FutureBuilder<List<Map<String, dynamic>?>>(
       future: _fetchWeekAttendance(),
       builder: (context, snap) {
-        final attendance =
-            snap.data ?? List<Map<String, dynamic>?>.filled(5, null);
+        final attendance = snap.data ??
+            List<Map<String, dynamic>?>.filled(5, null);
         final isLoading =
             snap.connectionState == ConnectionState.waiting;
 
@@ -509,8 +562,34 @@ class _MemberAttendanceCard extends StatelessWidget {
               ...List.generate(5, (i) {
                 final a = attendance[i];
                 final present = a?['clockedIn'] == true;
-                final label =
-                    isLoading ? '…' : (present ? _clockInLabel(a!) : '—');
+                final clockedOut =
+                    present && (a?['clockedOut'] == true);
+
+                // Three visual states
+                Color bgColor;
+                Color textColor;
+                String label;
+
+                if (isLoading) {
+                  bgColor = AppColors.surface;
+                  textColor = AppColors.textHint;
+                  label = '…';
+                } else if (present && clockedOut) {
+                  // Full day: green
+                  bgColor = AppColors.mint;
+                  textColor = AppColors.mintDark;
+                  label = _clockInLabel(a!);
+                } else if (present) {
+                  // Still clocked in: blue
+                  bgColor = AppColors.pastelBlue;
+                  textColor = AppColors.pastelBlueDark;
+                  label = _clockInLabel(a!);
+                } else {
+                  // Absent
+                  bgColor = AppColors.peach.withOpacity(0.4);
+                  textColor = AppColors.peachDark;
+                  label = '—';
+                }
 
                 return Expanded(
                   child: Center(
@@ -518,11 +597,7 @@ class _MemberAttendanceCard extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 4, vertical: 4),
                       decoration: BoxDecoration(
-                        color: isLoading
-                            ? AppColors.surface
-                            : present
-                                ? AppColors.mint
-                                : AppColors.peach.withOpacity(0.4),
+                        color: bgColor,
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
@@ -531,11 +606,7 @@ class _MemberAttendanceCard extends StatelessWidget {
                         style: GoogleFonts.inter(
                           fontSize: 10,
                           fontWeight: FontWeight.w500,
-                          color: isLoading
-                              ? AppColors.textHint
-                              : present
-                                  ? AppColors.mintDark
-                                  : AppColors.peachDark,
+                          color: textColor,
                         ),
                       ),
                     ),
@@ -576,8 +647,8 @@ class _TimePickerRow extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding:
-            const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        padding: const EdgeInsets.symmetric(
+            horizontal: 16, vertical: 14),
         decoration: BoxDecoration(
           color: AppColors.surface,
           borderRadius: BorderRadius.circular(12),

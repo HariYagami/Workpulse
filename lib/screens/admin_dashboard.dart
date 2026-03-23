@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -7,6 +8,7 @@ import 'package:presenceiq/screens/organization/my_organizations_screen.dart';
 import 'package:presenceiq/screens/organization/set_office_location_screen.dart';
 import 'package:presenceiq/services/auth_service.dart';
 import 'package:presenceiq/services/org_service.dart';
+import 'package:presenceiq/services/updates_service.dart';
 import '../theme/app_theme.dart';
 import '../models/organization_model.dart';
 import 'login_screen.dart';
@@ -93,7 +95,8 @@ class _AdminDashboardState extends State<AdminDashboard>
             tabBackgroundColor: AppColors.pastelBlue,
             gap: 6,
             tabBorderRadius: 14,
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             duration: const Duration(milliseconds: 380),
             curve: Curves.easeInOutCubic,
             haptic: true,
@@ -103,11 +106,26 @@ class _AdminDashboardState extends State<AdminDashboard>
               color: AppColors.pastelBlueDark,
             ),
             tabs: const [
-              GButton(icon: Icons.dashboard_rounded,   text: 'Home',       iconSize: 22),
-              GButton(icon: Icons.how_to_vote_rounded, text: 'Polls',      iconSize: 22),
-              GButton(icon: Icons.schedule_rounded,    text: 'Attendance', iconSize: 22),
-              GButton(icon: Icons.edit_note_rounded,   text: 'Updates',    iconSize: 22),
-              GButton(icon: Icons.bar_chart_rounded,   text: 'Insights',   iconSize: 22),
+              GButton(
+                  icon: Icons.dashboard_rounded,
+                  text: 'Home',
+                  iconSize: 22),
+              GButton(
+                  icon: Icons.how_to_vote_rounded,
+                  text: 'Polls',
+                  iconSize: 22),
+              GButton(
+                  icon: Icons.schedule_rounded,
+                  text: 'Attendance',
+                  iconSize: 22),
+              GButton(
+                  icon: Icons.edit_note_rounded,
+                  text: 'Updates',
+                  iconSize: 22),
+              GButton(
+                  icon: Icons.bar_chart_rounded,
+                  text: 'Insights',
+                  iconSize: 22),
             ],
           ),
         ),
@@ -129,7 +147,16 @@ class _HomeTab extends StatefulWidget {
 }
 
 class _HomeTabState extends State<_HomeTab> {
+  final _db = FirebaseFirestore.instance;
+  final _updatesService = UpdatesService();
   bool _locationSet = false;
+
+  // ── Derived from Firestore streams ────────────────────────────────────────
+  // Today's date string e.g. "2025-01-15"
+  String get _todayStr {
+    final d = DateTime.now();
+    return '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+  }
 
   @override
   void initState() {
@@ -151,8 +178,51 @@ class _HomeTabState extends State<_HomeTab> {
 
   String _initials(String name) {
     final parts = name.trim().split(' ');
-    if (parts.length >= 2) return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
+    if (parts.length >= 2) {
+      return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
+    }
     return name.isNotEmpty ? name[0].toUpperCase() : 'A';
+  }
+
+  // ── Stream: today's attendance records for all staff ─────────────────────
+  Stream<List<Map<String, dynamic>>> get _todayAttendanceStream {
+    return _db
+        .collection('organizations')
+        .doc(widget.org.id)
+        .collection('attendance')
+        .doc(_todayStr)
+        .collection('records')
+        .snapshots()
+        .map((snap) =>
+            snap.docs.map((d) => {'id': d.id, ...d.data()}).toList());
+  }
+
+  // ── Stream: staff members ─────────────────────────────────────────────────
+  Stream<List<Map<String, dynamic>>> get _staffStream {
+    return _db
+        .collection('organizations')
+        .doc(widget.org.id)
+        .collection('members')
+        .where('role', isEqualTo: 'staff')
+        .snapshots()
+        .map((snap) =>
+            snap.docs.map((d) => {'id': d.id, ...d.data()}).toList());
+  }
+
+  // ── Stream: today's updates ───────────────────────────────────────────────
+  Stream<List<Map<String, dynamic>>> get _todayUpdatesStream {
+    return _updatesService.streamTodayUpdates(widget.org.id);
+  }
+
+  // ── Stream: active polls count ────────────────────────────────────────────
+  Stream<int> get _activePollsStream {
+    return _db
+        .collection('organizations')
+        .doc(widget.org.id)
+        .collection('polls')
+        .where('isActive', isEqualTo: true)
+        .snapshots()
+        .map((snap) => snap.docs.length);
   }
 
   @override
@@ -162,11 +232,11 @@ class _HomeTabState extends State<_HomeTab> {
         physics: const BouncingScrollPhysics(),
         slivers: [
           SliverToBoxAdapter(child: _buildHeader(context)),
-          // ── Location not set warning banner ──────────────────────────
           if (!_locationSet)
             SliverToBoxAdapter(child: _buildLocationBanner(context)),
           SliverToBoxAdapter(child: _buildStatsRow()),
-          SliverToBoxAdapter(child: _sectionTitle('Today\'s Attendance')),
+          SliverToBoxAdapter(
+              child: _sectionTitle('Today\'s Attendance')),
           SliverToBoxAdapter(child: _buildAttendanceList()),
           SliverToBoxAdapter(child: _sectionTitle('Recent Updates')),
           SliverToBoxAdapter(child: _buildUpdatesList()),
@@ -176,7 +246,284 @@ class _HomeTabState extends State<_HomeTab> {
     );
   }
 
-  // ── Banner shown when office location is not yet set ─────────────────────
+  // ── Stats Row — real data ─────────────────────────────────────────────────
+  Widget _buildStatsRow() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
+      child: StreamBuilder<List<Map<String, dynamic>>>(
+        stream: _staffStream,
+        builder: (context, staffSnap) {
+          return StreamBuilder<List<Map<String, dynamic>>>(
+            stream: _todayAttendanceStream,
+            builder: (context, attSnap) {
+              return StreamBuilder<int>(
+                stream: _activePollsStream,
+                builder: (context, pollSnap) {
+                  return StreamBuilder<List<Map<String, dynamic>>>(
+                    stream: _todayUpdatesStream,
+                    builder: (context, updSnap) {
+                      final totalStaff =
+                          staffSnap.data?.length ?? 0;
+                      final clockedIn = (attSnap.data ?? [])
+                          .where((r) => r['clockedIn'] == true)
+                          .length;
+                      final activePolls = pollSnap.data ?? 0;
+                      final totalUpdates =
+                          updSnap.data?.length ?? 0;
+                      final reviewedUpdates = (updSnap.data ?? [])
+                          .where((u) => u['reviewed'] == true)
+                          .length;
+
+                      return Row(
+                        children: [
+                          Expanded(
+                            child: _StatCard(
+                              label: 'Clocked In',
+                              value: '$clockedIn/$totalStaff',
+                              color: AppColors.mint,
+                              textColor: AppColors.mintDark,
+                              icon: Icons
+                                  .check_circle_outline_rounded,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _StatCard(
+                              label: 'Active Polls',
+                              value: '$activePolls',
+                              color: AppColors.pastelBlue,
+                              textColor: AppColors.pastelBlueDark,
+                              icon: Icons.how_to_vote_rounded,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _StatCard(
+                              label: 'Updates',
+                              value:
+                                  '$reviewedUpdates/$totalUpdates',
+                              color: AppColors.lavender,
+                              textColor: AppColors.lavenderDark,
+                              icon: Icons.edit_note_rounded,
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                  );
+                },
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  // ── Attendance list — real data ───────────────────────────────────────────
+  Widget _buildAttendanceList() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      child: StreamBuilder<List<Map<String, dynamic>>>(
+        stream: _staffStream,
+        builder: (context, staffSnap) {
+          return StreamBuilder<List<Map<String, dynamic>>>(
+            stream: _todayAttendanceStream,
+            builder: (context, attSnap) {
+              if (staffSnap.connectionState ==
+                      ConnectionState.waiting ||
+                  attSnap.connectionState ==
+                      ConnectionState.waiting) {
+                return Container(
+                  height: 80,
+                  decoration: BoxDecoration(
+                    color: AppColors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: const Center(
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: AppColors.pastelBlueDark),
+                  ),
+                );
+              }
+
+              final staffList = staffSnap.data ?? [];
+              final attendanceMap = {
+                for (final r in (attSnap.data ?? [])) r['id']: r
+              };
+
+              if (staffList.isEmpty) {
+                return Container(
+                  padding: const EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                    color: AppColors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: Center(
+                    child: Text('No staff members yet.',
+                        style: GoogleFonts.inter(
+                            fontSize: 14,
+                            color: AppColors.textHint)),
+                  ),
+                );
+              }
+
+              return Container(
+                decoration: BoxDecoration(
+                  color: AppColors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Column(
+                  children: staffList.asMap().entries.map((e) {
+                    final i = e.key;
+                    final staff = e.value;
+                    final uid = staff['id'] as String;
+                    final name =
+                        (staff['name'] as String?) ?? 'Unknown';
+                    final role =
+                        (staff['role'] as String?) ?? 'Staff';
+                    final record = attendanceMap[uid];
+                    final clocked =
+                        record?['clockedIn'] == true;
+                    final clockedOut =
+                        record?['clockedOut'] == true;
+
+                    String timeLabel = '—';
+                    if (clocked && record?['clockInTime'] != null) {
+                      final ts =
+                          record!['clockInTime'] as Timestamp;
+                      final tod = TimeOfDay.fromDateTime(
+                          ts.toDate());
+                      final h = tod.hour == 0
+                          ? 12
+                          : tod.hour > 12
+                              ? tod.hour - 12
+                              : tod.hour;
+                      final m = tod.minute
+                          .toString()
+                          .padLeft(2, '0');
+                      final period =
+                          tod.hour < 12 ? 'AM' : 'PM';
+                      timeLabel = '$h:$m $period';
+                    }
+
+                    return _AttendanceTile(
+                      name: name,
+                      role: role,
+                      clocked: clocked,
+                      clockedOut: clockedOut,
+                      time: timeLabel,
+                      showBorder: i != staffList.length - 1,
+                    );
+                  }).toList(),
+                ),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  // ── Updates list — real data ──────────────────────────────────────────────
+  Widget _buildUpdatesList() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      child: StreamBuilder<List<Map<String, dynamic>>>(
+        stream: _todayUpdatesStream,
+        builder: (context, snap) {
+          if (snap.connectionState == ConnectionState.waiting) {
+            return Container(
+              height: 80,
+              decoration: BoxDecoration(
+                color: AppColors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: const Center(
+                child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: AppColors.pastelBlueDark),
+              ),
+            );
+          }
+
+          final updates = snap.data ?? [];
+
+          if (updates.isEmpty) {
+            return Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: AppColors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Center(
+                child: Text('No updates submitted yet today.',
+                    style: GoogleFonts.inter(
+                        fontSize: 14, color: AppColors.textHint)),
+              ),
+            );
+          }
+
+          // Show latest 3 updates on home tab
+          final shown = updates.take(3).toList();
+
+          return Container(
+            decoration: BoxDecoration(
+              color: AppColors.white,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: Column(
+              children: shown.asMap().entries.map((e) {
+                final i = e.key;
+                final u = e.value;
+                final name =
+                    (u['name'] as String?) ?? 'Unknown';
+                final work = (u['work'] as String?) ?? '';
+                final reviewed =
+                    (u['reviewed'] as bool?) ?? false;
+                final ts = u['submittedAt'];
+                String time = '';
+                if (ts != null) {
+                  final tod = TimeOfDay.fromDateTime(
+                      (ts as Timestamp).toDate());
+                  final h = tod.hour == 0
+                      ? 12
+                      : tod.hour > 12
+                          ? tod.hour - 12
+                          : tod.hour;
+                  final m = tod.minute
+                      .toString()
+                      .padLeft(2, '0');
+                  final period =
+                      tod.hour < 12 ? 'AM' : 'PM';
+                  time = '$h:$m $period';
+                }
+
+                return _UpdateTile(
+                  name: name,
+                  update: work,
+                  time: time,
+                  reviewed: reviewed,
+                  showBorder: i != shown.length - 1,
+                  orgId: widget.org.id,
+                  updateId: (u['id'] as String?) ?? '',
+                );
+              }).toList(),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  // ── Location banner ───────────────────────────────────────────────────────
   Widget _buildLocationBanner(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
@@ -187,7 +534,8 @@ class _HomeTabState extends State<_HomeTab> {
           decoration: BoxDecoration(
             color: AppColors.peach,
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: AppColors.peachDark.withOpacity(0.3)),
+            border: Border.all(
+                color: AppColors.peachDark.withOpacity(0.3)),
           ),
           child: Row(
             children: [
@@ -209,7 +557,8 @@ class _HomeTabState extends State<_HomeTab> {
                     Text(
                       'Tap to set location for GPS-based attendance.',
                       style: GoogleFonts.inter(
-                          fontSize: 12, color: AppColors.peachDark),
+                          fontSize: 12,
+                          color: AppColors.peachDark),
                     ),
                   ],
                 ),
@@ -224,18 +573,14 @@ class _HomeTabState extends State<_HomeTab> {
   }
 
   Future<void> _openSetLocation(BuildContext context) async {
-  // ✅ No need to fetch existing — screen loads it internally
-  await Navigator.of(context).push(
-    MaterialPageRoute(
-      builder: (_) => SetOfficeLocationScreen(
-        orgId: widget.org.id,         // ✅ only orgId needed now
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) =>
+            SetOfficeLocationScreen(orgId: widget.org.id),
       ),
-    ),
-  );
-
-  // Refresh banner state after returning
-  _checkLocationSet();
-}
+    );
+    _checkLocationSet();
+  }
 
   void _showLogoutDialog(BuildContext context) {
     showDialog(
@@ -243,7 +588,8 @@ class _HomeTabState extends State<_HomeTab> {
       barrierDismissible: true,
       builder: (dialogCtx) => AlertDialog(
         backgroundColor: AppColors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18)),
         title: Text(
           'Log out?',
           style: GoogleFonts.inter(
@@ -254,9 +600,12 @@ class _HomeTabState extends State<_HomeTab> {
         content: Text(
           'You\'ll be signed out of your admin account.',
           style: GoogleFonts.inter(
-              fontSize: 13, color: AppColors.textSecondary, height: 1.5),
+              fontSize: 13,
+              color: AppColors.textSecondary,
+              height: 1.5),
         ),
-        actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+        actionsPadding:
+            const EdgeInsets.fromLTRB(16, 0, 16, 14),
         actions: [
           SizedBox(
             width: double.infinity,
@@ -266,7 +615,8 @@ class _HomeTabState extends State<_HomeTab> {
                 backgroundColor: AppColors.surface,
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12)),
-                padding: const EdgeInsets.symmetric(vertical: 13),
+                padding:
+                    const EdgeInsets.symmetric(vertical: 13),
               ),
               child: Text('Cancel',
                   style: GoogleFonts.inter(
@@ -285,10 +635,14 @@ class _HomeTabState extends State<_HomeTab> {
                 if (context.mounted) {
                   Navigator.of(context).pushAndRemoveUntil(
                     PageRouteBuilder(
-                      pageBuilder: (_, __, ___) => const LoginScreen(),
-                      transitionsBuilder: (_, anim, __, child) =>
-                          FadeTransition(opacity: anim, child: child),
-                      transitionDuration: const Duration(milliseconds: 400),
+                      pageBuilder: (_, __, ___) =>
+                          const LoginScreen(),
+                      transitionsBuilder:
+                          (_, anim, __, child) =>
+                              FadeTransition(
+                                  opacity: anim, child: child),
+                      transitionDuration:
+                          const Duration(milliseconds: 400),
                     ),
                     (route) => false,
                   );
@@ -298,7 +652,8 @@ class _HomeTabState extends State<_HomeTab> {
                 backgroundColor: const Color(0xFFFCEBEB),
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12)),
-                padding: const EdgeInsets.symmetric(vertical: 13),
+                padding:
+                    const EdgeInsets.symmetric(vertical: 13),
               ),
               child: Text('Log out',
                   style: GoogleFonts.inter(
@@ -327,7 +682,8 @@ class _HomeTabState extends State<_HomeTab> {
               GestureDetector(
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute(
-                      builder: (_) => const MyOrganizationsScreen()),
+                      builder: (_) =>
+                          const MyOrganizationsScreen()),
                 ),
                 child: Row(
                   children: [
@@ -343,7 +699,8 @@ class _HomeTabState extends State<_HomeTab> {
                             style: GoogleFonts.inter(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w700,
-                                color: AppColors.pastelBlueDark)),
+                                color:
+                                    AppColors.pastelBlueDark)),
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -358,7 +715,6 @@ class _HomeTabState extends State<_HomeTab> {
                 ),
               ),
               const Spacer(),
-              // Invite button
               GestureDetector(
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute(
@@ -366,8 +722,8 @@ class _HomeTabState extends State<_HomeTab> {
                           InviteMembersScreen(org: widget.org)),
                 ),
                 child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 7),
                   decoration: BoxDecoration(
                     color: AppColors.pastelBlue,
                     borderRadius: BorderRadius.circular(10),
@@ -375,7 +731,8 @@ class _HomeTabState extends State<_HomeTab> {
                   child: Row(
                     children: [
                       const Icon(Icons.person_add_rounded,
-                          size: 14, color: AppColors.pastelBlueDark),
+                          size: 14,
+                          color: AppColors.pastelBlueDark),
                       const SizedBox(width: 5),
                       Text('Invite',
                           style: GoogleFonts.inter(
@@ -387,7 +744,6 @@ class _HomeTabState extends State<_HomeTab> {
                 ),
               ),
               const SizedBox(width: 8),
-              // Set location button
               GestureDetector(
                 onTap: () => _openSetLocation(context),
                 child: Container(
@@ -408,7 +764,6 @@ class _HomeTabState extends State<_HomeTab> {
                 ),
               ),
               const SizedBox(width: 8),
-              // Logout button
               GestureDetector(
                 onTap: () => _showLogoutDialog(context),
                 child: Container(
@@ -433,7 +788,8 @@ class _HomeTabState extends State<_HomeTab> {
                   children: [
                     Text('${_greeting()},',
                         style: GoogleFonts.inter(
-                            fontSize: 14, color: AppColors.textSecondary)),
+                            fontSize: 14,
+                            color: AppColors.textSecondary)),
                     const SizedBox(height: 2),
                     Text(
                       displayName,
@@ -471,21 +827,6 @@ class _HomeTabState extends State<_HomeTab> {
     );
   }
 
-  Widget _buildStatsRow() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
-      child: Row(
-        children: [
-          Expanded(child: _StatCard(label: 'Clocked In',   value: '8/10', color: AppColors.mint,       textColor: AppColors.mintDark,       icon: Icons.check_circle_outline_rounded)),
-          const SizedBox(width: 12),
-          Expanded(child: _StatCard(label: 'Active Polls', value: '2',    color: AppColors.pastelBlue, textColor: AppColors.pastelBlueDark, icon: Icons.how_to_vote_rounded)),
-          const SizedBox(width: 12),
-          Expanded(child: _StatCard(label: 'Updates',      value: '6/10', color: AppColors.lavender,   textColor: AppColors.lavenderDark,   icon: Icons.edit_note_rounded)),
-        ],
-      ),
-    );
-  }
-
   Widget _sectionTitle(String title) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 20, 24, 12),
@@ -496,59 +837,280 @@ class _HomeTabState extends State<_HomeTab> {
               color: AppColors.textPrimary)),
     );
   }
+}
 
-  Widget _buildAttendanceList() {
-    final staff = [
-      _StaffStatus(name: 'Priya M',  role: 'Developer',   clocked: true,  time: '9:02 AM'),
-      _StaffStatus(name: 'Arjun K',  role: 'Designer',     clocked: true,  time: '9:15 AM'),
-      _StaffStatus(name: 'Sneha R',  role: 'QA Engineer',  clocked: false, time: '—'),
-      _StaffStatus(name: 'Rahul T',  role: 'Backend Dev',  clocked: true,  time: '8:58 AM'),
-    ];
+// ─────────────────────────────────────────────────────────────────────────────
+// REAL DATA WIDGETS
+// ─────────────────────────────────────────────────────────────────────────────
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24),
-      child: Container(
-        decoration: BoxDecoration(
-          color: AppColors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppColors.border),
-        ),
-        child: Column(
-          children: staff.asMap().entries.map((e) =>
-              _AttendanceTile(data: e.value, showBorder: e.key != staff.length - 1)
-          ).toList(),
-        ),
+class _AttendanceTile extends StatelessWidget {
+  final String name;
+  final String role;
+  final String time;
+  final bool clocked;
+  final bool clockedOut;
+  final bool showBorder;
+
+  const _AttendanceTile({
+    required this.name,
+    required this.role,
+    required this.clocked,
+    required this.clockedOut,
+    required this.time,
+    required this.showBorder,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // Three states: present+done (green), present+active (blue), absent (grey)
+    Color chipColor;
+    Color chipText;
+    String chipLabel;
+
+    if (clocked && clockedOut) {
+      chipColor = AppColors.mint;
+      chipText = AppColors.mintDark;
+      chipLabel = 'Done';
+    } else if (clocked) {
+      chipColor = AppColors.pastelBlue;
+      chipText = AppColors.pastelBlueDark;
+      chipLabel = 'Clocked In';
+    } else {
+      chipColor = AppColors.surface;
+      chipText = AppColors.textHint;
+      chipLabel = 'Absent';
+    }
+
+    final initials = name.length >= 2
+        ? name.substring(0, 2).toUpperCase()
+        : name.toUpperCase();
+
+    return Container(
+      padding:
+          const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        border: showBorder
+            ? const Border(
+                bottom: BorderSide(
+                    color: AppColors.border, width: 0.8))
+            : null,
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: clocked ? AppColors.mint : AppColors.surface,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Center(
+              child: Text(
+                initials,
+                style: GoogleFonts.inter(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: clocked
+                        ? AppColors.mintDark
+                        : AppColors.textSecondary),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(name,
+                    style: GoogleFonts.inter(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: AppColors.textPrimary)),
+                Text(role,
+                    style: GoogleFonts.inter(
+                        fontSize: 12,
+                        color: AppColors.textSecondary)),
+              ],
+            ),
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: chipColor,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  chipLabel,
+                  style: GoogleFonts.inter(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: chipText),
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(time,
+                  style: GoogleFonts.inter(
+                      fontSize: 11, color: AppColors.textHint)),
+            ],
+          ),
+        ],
       ),
     );
   }
+}
 
-  Widget _buildUpdatesList() {
-    final updates = [
-      _UpdateData(name: 'Priya M', update: 'Completed login module. Starting on dashboard.', time: '6:00 PM', reviewed: true),
-      _UpdateData(name: 'Arjun K', update: 'Finished UI mockups for the poll screen.',        time: '5:45 PM', reviewed: false),
-      _UpdateData(name: 'Rahul T', update: 'Fixed API bug on attendance endpoint.',            time: '5:30 PM', reviewed: false),
-    ];
+class _UpdateTile extends StatefulWidget {
+  final String name;
+  final String update;
+  final String time;
+  final bool reviewed;
+  final bool showBorder;
+  final String orgId;
+  final String updateId;
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24),
-      child: Container(
-        decoration: BoxDecoration(
-          color: AppColors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppColors.border),
-        ),
-        child: Column(
-          children: updates.asMap().entries.map((e) =>
-              _UpdateTile(data: e.value, showBorder: e.key != updates.length - 1)
-          ).toList(),
-        ),
+  const _UpdateTile({
+    required this.name,
+    required this.update,
+    required this.time,
+    required this.reviewed,
+    required this.showBorder,
+    required this.orgId,
+    required this.updateId,
+  });
+
+  @override
+  State<_UpdateTile> createState() => _UpdateTileState();
+}
+
+class _UpdateTileState extends State<_UpdateTile> {
+  bool _marking = false;
+  final _service = UpdatesService();
+
+  @override
+  Widget build(BuildContext context) {
+    final initials = widget.name.length >= 2
+        ? widget.name.substring(0, 2).toUpperCase()
+        : widget.name.toUpperCase();
+
+    return Container(
+      padding:
+          const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        border: widget.showBorder
+            ? const Border(
+                bottom: BorderSide(
+                    color: AppColors.border, width: 0.8))
+            : null,
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: AppColors.lavender,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Center(
+              child: Text(
+                initials,
+                style: GoogleFonts.inter(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.lavenderDark),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [
+                  Text(widget.name,
+                      style: GoogleFonts.inter(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                          color: AppColors.textPrimary)),
+                  const Spacer(),
+                  Text(widget.time,
+                      style: GoogleFonts.inter(
+                          fontSize: 11,
+                          color: AppColors.textHint)),
+                ]),
+                const SizedBox(height: 4),
+                Text(widget.update,
+                    style: GoogleFonts.inter(
+                        fontSize: 13,
+                        color: AppColors.textSecondary,
+                        height: 1.5),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis),
+                if (!widget.reviewed) ...[
+                  const SizedBox(height: 8),
+                  GestureDetector(
+                    onTap: (_marking ||
+                            widget.updateId.isEmpty)
+                        ? null
+                        : () async {
+                            setState(() => _marking = true);
+                            await _service.markReviewed(
+                                widget.orgId, widget.updateId);
+                            if (mounted) {
+                              setState(() => _marking = false);
+                            }
+                          },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: _marking
+                            ? AppColors.pastelBlueDark
+                                .withOpacity(0.5)
+                            : AppColors.pastelBlueDark,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: _marking
+                          ? const SizedBox(
+                              width: 12,
+                              height: 12,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white))
+                          : Text('Mark Reviewed',
+                              style: GoogleFonts.inter(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.white)),
+                    ),
+                  ),
+                ] else
+                  Row(children: [
+                    const Icon(Icons.check_circle_rounded,
+                        size: 13, color: AppColors.mintDark),
+                    const SizedBox(width: 4),
+                    Text('Reviewed',
+                        style: GoogleFonts.inter(
+                            fontSize: 12,
+                            color: AppColors.mintDark,
+                            fontWeight: FontWeight.w500)),
+                  ]),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SHARED WIDGETS — unchanged
+// STAT CARD — unchanged
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _StatCard extends StatelessWidget {
@@ -579,177 +1141,18 @@ class _StatCard extends StatelessWidget {
           const SizedBox(height: 10),
           Text(value,
               style: GoogleFonts.inter(
-                  fontSize: 22, fontWeight: FontWeight.w700,
-                  color: textColor, height: 1)),
+                  fontSize: 22,
+                  fontWeight: FontWeight.w700,
+                  color: textColor,
+                  height: 1)),
           const SizedBox(height: 4),
           Text(label,
               style: GoogleFonts.inter(
-                  fontSize: 11, fontWeight: FontWeight.w500,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
                   color: textColor.withOpacity(0.7))),
         ],
       ),
     );
   }
-}
-
-class _AttendanceTile extends StatelessWidget {
-  final _StaffStatus data;
-  final bool showBorder;
-
-  const _AttendanceTile({required this.data, required this.showBorder});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      decoration: BoxDecoration(
-        border: showBorder
-            ? const Border(bottom: BorderSide(color: AppColors.border, width: 0.8))
-            : null,
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 38, height: 38,
-            decoration: BoxDecoration(
-              color: data.clocked ? AppColors.mint : AppColors.surface,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Center(
-              child: Text(
-                data.name.substring(0, 2).toUpperCase(),
-                style: GoogleFonts.inter(
-                    fontSize: 13, fontWeight: FontWeight.w600,
-                    color: data.clocked ? AppColors.mintDark : AppColors.textSecondary),
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(data.name,
-                    style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w500, color: AppColors.textPrimary)),
-                Text(data.role,
-                    style: GoogleFonts.inter(fontSize: 12, color: AppColors.textSecondary)),
-              ],
-            ),
-          ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: data.clocked ? AppColors.mint : AppColors.surface,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  data.clocked ? 'Clocked In' : 'Absent',
-                  style: GoogleFonts.inter(
-                      fontSize: 11, fontWeight: FontWeight.w600,
-                      color: data.clocked ? AppColors.mintDark : AppColors.textHint),
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(data.time,
-                  style: GoogleFonts.inter(fontSize: 11, color: AppColors.textHint)),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _UpdateTile extends StatelessWidget {
-  final _UpdateData data;
-  final bool showBorder;
-
-  const _UpdateTile({required this.data, required this.showBorder});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      decoration: BoxDecoration(
-        border: showBorder
-            ? const Border(bottom: BorderSide(color: AppColors.border, width: 0.8))
-            : null,
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 38, height: 38,
-            decoration: BoxDecoration(
-              color: AppColors.lavender,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Center(
-              child: Text(
-                data.name.substring(0, 2).toUpperCase(),
-                style: GoogleFonts.inter(
-                    fontSize: 13, fontWeight: FontWeight.w600,
-                    color: AppColors.lavenderDark),
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(children: [
-                  Text(data.name,
-                      style: GoogleFonts.inter(fontSize: 14,
-                          fontWeight: FontWeight.w500, color: AppColors.textPrimary)),
-                  const Spacer(),
-                  Text(data.time,
-                      style: GoogleFonts.inter(fontSize: 11, color: AppColors.textHint)),
-                ]),
-                const SizedBox(height: 4),
-                Text(data.update,
-                    style: GoogleFonts.inter(fontSize: 13,
-                        color: AppColors.textSecondary, height: 1.5),
-                    maxLines: 2, overflow: TextOverflow.ellipsis),
-                if (!data.reviewed) ...[
-                  const SizedBox(height: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-                    decoration: BoxDecoration(
-                        color: AppColors.pastelBlue,
-                        borderRadius: BorderRadius.circular(8)),
-                    child: Text('Mark Reviewed',
-                        style: GoogleFonts.inter(fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.pastelBlueDark)),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// DATA MODELS — unchanged
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _StaffStatus {
-  final String name, role, time;
-  final bool clocked;
-  const _StaffStatus({required this.name, required this.role,
-      required this.clocked, required this.time});
-}
-
-class _UpdateData {
-  final String name, update, time;
-  final bool reviewed;
-  const _UpdateData({required this.name, required this.update,
-      required this.time, required this.reviewed});
 }
