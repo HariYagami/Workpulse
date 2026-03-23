@@ -82,26 +82,25 @@ class _StaffDashboardShellState extends State<_StaffDashboardShell>
   late final Animation<double> _fadeAnimation;
   late final List<Widget> _screens;
 
-  @override
-  void initState() {
-    super.initState();
-    _screens = [
-      StaffHomeTab(org: widget.org),
-      StaffAttendanceScreen(org: widget.org),
-      StaffPollsScreen(org: widget.org),
-      StaffUpdatesScreen(org: widget.org),
-    ];
-    _fadeController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 220),
-    );
-    _fadeAnimation = CurvedAnimation(
-      parent: _fadeController,
-      curve: Curves.easeOut,
-    );
-    _fadeController.forward();
-  }
-
+@override
+void initState() {
+  super.initState();
+  _screens = [
+    StaffHomeTab(org: widget.org),
+    StaffAttendanceScreen(org: widget.org),
+    StaffPollsScreen(org: widget.org),
+    StaffUpdatesScreen(org: widget.org), // ✅ removed staffName and staffRole
+  ];
+  _fadeController = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 220),
+  );
+  _fadeAnimation = CurvedAnimation(
+    parent: _fadeController,
+    curve: Curves.easeOut,
+  );
+  _fadeController.forward();
+}
   void _onTabChanged(int index) {
     if (index == _selectedIndex) return;
     _fadeController.forward(from: 0);

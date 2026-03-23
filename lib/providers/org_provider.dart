@@ -20,5 +20,4 @@ final orgMembersProvider =
 });
 
 // Currently selected org (set when admin taps an org card)
-final selectedOrgProvider =
-    StateProvider<OrganizationModel?>((ref) => null);
+final selectedOrgProvider = StateProvider<OrganizationModel?>((ref) => null);

@@ -2,10 +2,11 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_nav_bar/google_nav_bar.dart';
-import 'package:google_sign_in/google_sign_in.dart';
 import 'package:presenceiq/screens/organization/invite_members_screen.dart';
 import 'package:presenceiq/screens/organization/my_organizations_screen.dart';
+import 'package:presenceiq/screens/organization/set_office_location_screen.dart';
 import 'package:presenceiq/services/auth_service.dart';
+import 'package:presenceiq/services/org_service.dart';
 import '../theme/app_theme.dart';
 import '../models/organization_model.dart';
 import 'login_screen.dart';
@@ -13,7 +14,6 @@ import 'polls_screen.dart';
 import 'attendance_screen.dart';
 import 'updates_screen.dart';
 import 'insights_screen.dart';
-
 
 class AdminDashboard extends StatefulWidget {
   final OrganizationModel org;
@@ -120,11 +120,27 @@ class _AdminDashboardState extends State<AdminDashboard>
 // HOME TAB
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _HomeTab extends StatelessWidget {
+class _HomeTab extends StatefulWidget {
   final OrganizationModel org;
   const _HomeTab({required this.org});
 
-  // ── Helpers ────────────────────────────────────────────────────────────────
+  @override
+  State<_HomeTab> createState() => _HomeTabState();
+}
+
+class _HomeTabState extends State<_HomeTab> {
+  bool _locationSet = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkLocationSet();
+  }
+
+  Future<void> _checkLocationSet() async {
+    final loc = await OrgService().getOfficeLocation(widget.org.id);
+    if (mounted) setState(() => _locationSet = loc != null);
+  }
 
   String _greeting() {
     final h = DateTime.now().hour;
@@ -135,9 +151,7 @@ class _HomeTab extends StatelessWidget {
 
   String _initials(String name) {
     final parts = name.trim().split(' ');
-    if (parts.length >= 2) {
-      return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
-    }
+    if (parts.length >= 2) return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
     return name.isNotEmpty ? name[0].toUpperCase() : 'A';
   }
 
@@ -148,6 +162,9 @@ class _HomeTab extends StatelessWidget {
         physics: const BouncingScrollPhysics(),
         slivers: [
           SliverToBoxAdapter(child: _buildHeader(context)),
+          // ── Location not set warning banner ──────────────────────────
+          if (!_locationSet)
+            SliverToBoxAdapter(child: _buildLocationBanner(context)),
           SliverToBoxAdapter(child: _buildStatsRow()),
           SliverToBoxAdapter(child: _sectionTitle('Today\'s Attendance')),
           SliverToBoxAdapter(child: _buildAttendanceList()),
@@ -158,6 +175,67 @@ class _HomeTab extends StatelessWidget {
       ),
     );
   }
+
+  // ── Banner shown when office location is not yet set ─────────────────────
+  Widget _buildLocationBanner(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
+      child: GestureDetector(
+        onTap: () => _openSetLocation(context),
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: AppColors.peach,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: AppColors.peachDark.withOpacity(0.3)),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.location_off_rounded,
+                  size: 20, color: AppColors.peachDark),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Office location not set',
+                      style: GoogleFonts.inter(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.peachDark,
+                      ),
+                    ),
+                    Text(
+                      'Tap to set location for GPS-based attendance.',
+                      style: GoogleFonts.inter(
+                          fontSize: 12, color: AppColors.peachDark),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.arrow_forward_ios_rounded,
+                  size: 14, color: AppColors.peachDark),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openSetLocation(BuildContext context) async {
+  // ✅ No need to fetch existing — screen loads it internally
+  await Navigator.of(context).push(
+    MaterialPageRoute(
+      builder: (_) => SetOfficeLocationScreen(
+        orgId: widget.org.id,         // ✅ only orgId needed now
+      ),
+    ),
+  );
+
+  // Refresh banner state after returning
+  _checkLocationSet();
+}
 
   void _showLogoutDialog(BuildContext context) {
     showDialog(
@@ -180,7 +258,6 @@ class _HomeTab extends StatelessWidget {
         ),
         actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
         actions: [
-          // Cancel
           SizedBox(
             width: double.infinity,
             child: TextButton(
@@ -199,25 +276,24 @@ class _HomeTab extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 8),
-          // Logout
           SizedBox(
             width: double.infinity,
             child: TextButton(
-        onPressed: () async {
-  Navigator.of(dialogCtx).pop();
-  await AuthService().signOut(); // uses the singleton — guaranteed same instance
-  if (context.mounted) {
-    Navigator.of(context).pushAndRemoveUntil(
-      PageRouteBuilder(
-        pageBuilder: (_, __, ___) => const LoginScreen(),
-        transitionsBuilder: (_, anim, __, child) =>
-            FadeTransition(opacity: anim, child: child),
-        transitionDuration: const Duration(milliseconds: 400),
-      ),
-      (route) => false,
-    );
-  }
-},
+              onPressed: () async {
+                Navigator.of(dialogCtx).pop();
+                await AuthService().signOut();
+                if (context.mounted) {
+                  Navigator.of(context).pushAndRemoveUntil(
+                    PageRouteBuilder(
+                      pageBuilder: (_, __, ___) => const LoginScreen(),
+                      transitionsBuilder: (_, anim, __, child) =>
+                          FadeTransition(opacity: anim, child: child),
+                      transitionDuration: const Duration(milliseconds: 400),
+                    ),
+                    (route) => false,
+                  );
+                }
+              },
               style: TextButton.styleFrom(
                 backgroundColor: const Color(0xFFFCEBEB),
                 shape: RoundedRectangleBorder(
@@ -246,7 +322,6 @@ class _HomeTab extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Org switcher + invite + logout row
           Row(
             children: [
               GestureDetector(
@@ -264,7 +339,7 @@ class _HomeTab extends StatelessWidget {
                         borderRadius: BorderRadius.circular(9),
                       ),
                       child: Center(
-                        child: Text(org.initials,
+                        child: Text(widget.org.initials,
                             style: GoogleFonts.inter(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w700,
@@ -272,7 +347,7 @@ class _HomeTab extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    Text(org.name,
+                    Text(widget.org.name,
                         style: GoogleFonts.inter(
                             fontSize: 13,
                             fontWeight: FontWeight.w500,
@@ -287,7 +362,8 @@ class _HomeTab extends StatelessWidget {
               GestureDetector(
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute(
-                      builder: (_) => InviteMembersScreen(org: org)),
+                      builder: (_) =>
+                          InviteMembersScreen(org: widget.org)),
                 ),
                 child: Container(
                   padding:
@@ -311,6 +387,27 @@ class _HomeTab extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
+              // Set location button
+              GestureDetector(
+                onTap: () => _openSetLocation(context),
+                child: Container(
+                  padding: const EdgeInsets.all(7),
+                  decoration: BoxDecoration(
+                    color: _locationSet
+                        ? AppColors.mint
+                        : AppColors.peach,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(
+                    Icons.location_on_rounded,
+                    size: 16,
+                    color: _locationSet
+                        ? AppColors.mintDark
+                        : AppColors.peachDark,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
               // Logout button
               GestureDetector(
                 onTap: () => _showLogoutDialog(context),
@@ -327,8 +424,6 @@ class _HomeTab extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 16),
-
-          // Greeting + real user name + avatar
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
@@ -355,7 +450,6 @@ class _HomeTab extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 12),
-              // Avatar — photo if available, else initials
               CircleAvatar(
                 radius: 22,
                 backgroundColor: AppColors.pastelBlue,
@@ -454,7 +548,7 @@ class _HomeTab extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SHARED WIDGETS
+// SHARED WIDGETS — unchanged
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _StatCard extends StatelessWidget {
@@ -643,7 +737,7 @@ class _UpdateTile extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DATA MODELS
+// DATA MODELS — unchanged
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _StaffStatus {

@@ -1,57 +1,25 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
+import '../services/updates_service.dart';
 
 class UpdatesScreen extends StatelessWidget {
   final bool embedded;
   final String orgId;
-  const UpdatesScreen({super.key, this.embedded = false, this.orgId = ''});
+  final int memberCount;
 
-  final List<_DailyUpdate> _updates = const [
-    _DailyUpdate(
-      name: 'Priya M',
-      role: 'Developer',
-      work: 'Completed the login module and started on the dashboard layout.',
-      blockers: 'None',
-      tomorrow: 'Admin dashboard UI implementation.',
-      time: '6:00 PM',
-      streak: 8,
-      reviewed: true,
-    ),
-    _DailyUpdate(
-      name: 'Arjun K',
-      role: 'Designer',
-      work: 'Finished UI mockups for poll screen and onboarding screens.',
-      blockers: 'Waiting for brand guidelines from client.',
-      tomorrow: 'Start on the staff dashboard designs.',
-      time: '5:45 PM',
-      streak: 5,
-      reviewed: false,
-    ),
-    _DailyUpdate(
-      name: 'Rahul T',
-      role: 'Backend Dev',
-      work: 'Fixed the attendance API bug. Added role-based access middleware.',
-      blockers: 'None',
-      tomorrow: 'Work on Firestore security rules.',
-      time: '5:30 PM',
-      streak: 12,
-      reviewed: false,
-    ),
-    _DailyUpdate(
-      name: 'Sneha R',
-      role: 'QA Engineer',
-      work: 'Tested login and onboarding flows. Raised 3 bugs.',
-      blockers: 'Need updated test credentials.',
-      tomorrow: 'Regression testing on the attendance module.',
-      time: '6:10 PM',
-      streak: 3,
-      reviewed: true,
-    ),
-  ];
+  const UpdatesScreen({
+    super.key,
+    this.embedded = false,
+    required this.orgId,
+    this.memberCount = 0,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final service = UpdatesService();
+    final currentUid = service.currentUid;
+
     return Scaffold(
       backgroundColor: AppColors.surface,
       appBar: embedded
@@ -64,36 +32,69 @@ class UpdatesScreen extends StatelessWidget {
               ),
             ),
       body: SafeArea(
-        child: ListView(
-          physics: const BouncingScrollPhysics(),
-          padding: const EdgeInsets.all(24),
-          children: [
-            if (embedded) ...[
-              Text('Daily Updates',
-                  style: GoogleFonts.inter(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textPrimary,
-                      letterSpacing: -0.3)),
-              Text('Staff work summaries',
-                  style: GoogleFonts.inter(
-                      fontSize: 13, color: AppColors.textSecondary)),
-              const SizedBox(height: 20),
-            ],
-            _buildSummaryBanner(),
-            const SizedBox(height: 20),
-            ..._updates.map((u) => Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: _UpdateCard(update: u),
-                )),
-          ],
+        child: StreamBuilder<List<Map<String, dynamic>>>(
+          stream: service.streamTodayUpdates(orgId),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            final updates = snapshot.data ?? [];
+            final reviewed =
+                updates.where((u) => u['reviewed'] == true).length;
+
+            return ListView(
+              physics: const BouncingScrollPhysics(),
+              padding: const EdgeInsets.all(24),
+              children: [
+                if (embedded) ...[
+                  Text('Daily Updates',
+                      style: GoogleFonts.inter(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textPrimary,
+                          letterSpacing: -0.3)),
+                  Text('Staff work summaries',
+                      style: GoogleFonts.inter(
+                          fontSize: 13, color: AppColors.textSecondary)),
+                  const SizedBox(height: 20),
+                ],
+                _buildSummaryBanner(reviewed, updates.length),
+                const SizedBox(height: 20),
+                if (updates.isEmpty)
+                  Center(
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 40),
+                      child: Column(
+                        children: [
+                          Icon(Icons.inbox_rounded,
+                              size: 44, color: AppColors.textHint),
+                          const SizedBox(height: 12),
+                          Text('No updates submitted yet today',
+                              style: GoogleFonts.inter(
+                                  fontSize: 14,
+                                  color: AppColors.textSecondary)),
+                        ],
+                      ),
+                    ),
+                  )
+                else
+                  ...updates.map((u) => Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: _UpdateCard(
+                          update: u,
+                          orgId: orgId,
+                          currentUid: currentUid,
+                        ),
+                      )),
+              ],
+            );
+          },
         ),
       ),
     );
   }
 
-  Widget _buildSummaryBanner() {
-    final reviewed = _updates.where((u) => u.reviewed).length;
+  Widget _buildSummaryBanner(int reviewed, int total) {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
@@ -106,23 +107,17 @@ class UpdatesScreen extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Today\'s Updates',
-                  style: GoogleFonts.inter(
-                    fontSize: 13,
-                    color: AppColors.lavenderDark,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
+                Text("Today's Updates",
+                    style: GoogleFonts.inter(
+                        fontSize: 13,
+                        color: AppColors.lavenderDark,
+                        fontWeight: FontWeight.w500)),
                 const SizedBox(height: 4),
-                Text(
-                  '$reviewed/${_updates.length} reviewed',
-                  style: GoogleFonts.inter(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.lavenderDark,
-                  ),
-                ),
+                Text('$reviewed/$total reviewed',
+                    style: GoogleFonts.inter(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.lavenderDark)),
               ],
             ),
           ),
@@ -142,10 +137,18 @@ class UpdatesScreen extends StatelessWidget {
   }
 }
 
-class _UpdateCard extends StatefulWidget {
-  final _DailyUpdate update;
+// ─── Update Card ──────────────────────────────────────────────────────────────
 
-  const _UpdateCard({required this.update});
+class _UpdateCard extends StatefulWidget {
+  final Map<String, dynamic> update;
+  final String orgId;
+  final String currentUid;
+
+  const _UpdateCard({
+    required this.update,
+    required this.orgId,
+    required this.currentUid,
+  });
 
   @override
   State<_UpdateCard> createState() => _UpdateCardState();
@@ -153,9 +156,35 @@ class _UpdateCard extends StatefulWidget {
 
 class _UpdateCardState extends State<_UpdateCard> {
   bool _expanded = false;
+  bool _marking = false;
+  final _service = UpdatesService();
 
   @override
   Widget build(BuildContext context) {
+    final u = widget.update;
+    final uid = (u['uid'] ?? '') as String;
+    final isMe = uid == widget.currentUid;
+    final displayName = (u['name'] ?? '?') as String;
+    final name = isMe ? 'You' : displayName;
+    final role = (u['role'] ?? '') as String;
+    final work = (u['work'] ?? '') as String;
+    final blockers = (u['blockers'] ?? 'None') as String;
+    final tomorrow = (u['tomorrow'] ?? '') as String;
+    final streak = (u['streak'] ?? 0) as int;
+    final reviewed = (u['reviewed'] ?? false) as bool;
+    final ts = u['submittedAt'];
+    final time = ts != null
+        ? TimeOfDay.fromDateTime((ts as dynamic).toDate()).format(context)
+        : '';
+
+    // Avatar always uses the real name, not "You"
+    final initials = displayName.isNotEmpty
+        ? (displayName.length >= 2
+                ? displayName.substring(0, 2)
+                : displayName)
+            .toUpperCase()
+        : '?';
+
     return GestureDetector(
       onTap: () => setState(() => _expanded = !_expanded),
       child: AnimatedContainer(
@@ -165,7 +194,7 @@ class _UpdateCardState extends State<_UpdateCard> {
           color: AppColors.white,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: widget.update.reviewed
+            color: reviewed
                 ? AppColors.border
                 : AppColors.pastelBlueDark.withOpacity(0.3),
           ),
@@ -184,7 +213,7 @@ class _UpdateCardState extends State<_UpdateCard> {
                   ),
                   child: Center(
                     child: Text(
-                      widget.update.name.substring(0, 2).toUpperCase(),
+                      initials,
                       style: GoogleFonts.inter(
                         fontSize: 14,
                         fontWeight: FontWeight.w700,
@@ -198,21 +227,35 @@ class _UpdateCardState extends State<_UpdateCard> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        widget.update.name,
-                        style: GoogleFonts.inter(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.textPrimary,
-                        ),
+                      Row(
+                        children: [
+                          Text(name,
+                              style: GoogleFonts.inter(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.textPrimary)),
+                          if (isMe) ...[
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: AppColors.mintDark.withOpacity(0.12),
+                                borderRadius: BorderRadius.circular(5),
+                              ),
+                              child: Text('you',
+                                  style: GoogleFonts.inter(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w600,
+                                      color: AppColors.mintDark)),
+                            ),
+                          ],
+                        ],
                       ),
-                      Text(
-                        widget.update.role,
-                        style: GoogleFonts.inter(
-                          fontSize: 12,
-                          color: AppColors.textSecondary,
-                        ),
-                      ),
+                      Text(role,
+                          style: GoogleFonts.inter(
+                              fontSize: 12,
+                              color: AppColors.textSecondary)),
                     ],
                   ),
                 ),
@@ -232,44 +275,36 @@ class _UpdateCardState extends State<_UpdateCard> {
                           const Icon(Icons.local_fire_department_rounded,
                               size: 12, color: AppColors.mintDark),
                           const SizedBox(width: 3),
-                          Text(
-                            '${widget.update.streak}d',
-                            style: GoogleFonts.inter(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.mintDark,
-                            ),
-                          ),
+                          Text('${streak}d',
+                              style: GoogleFonts.inter(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.mintDark)),
                         ],
                       ),
                     ),
                     const SizedBox(height: 4),
-                    Text(
-                      widget.update.time,
-                      style: GoogleFonts.inter(
-                          fontSize: 11, color: AppColors.textHint),
-                    ),
+                    Text(time,
+                        style: GoogleFonts.inter(
+                            fontSize: 11, color: AppColors.textHint)),
                   ],
                 ),
               ],
             ),
             const SizedBox(height: 12),
-            Text(
-              widget.update.work,
-              style: GoogleFonts.inter(
-                fontSize: 13,
-                color: AppColors.textSecondary,
-                height: 1.55,
-              ),
-              maxLines: _expanded ? null : 2,
-              overflow: _expanded ? null : TextOverflow.ellipsis,
-            ),
+            Text(work,
+                style: GoogleFonts.inter(
+                    fontSize: 13,
+                    color: AppColors.textSecondary,
+                    height: 1.55),
+                maxLines: _expanded ? null : 2,
+                overflow: _expanded ? null : TextOverflow.ellipsis),
             if (_expanded) ...[
               const SizedBox(height: 12),
-              _buildInfoRow('Blockers', widget.update.blockers,
+              _buildInfoRow('Blockers', blockers,
                   AppColors.peach, AppColors.peachDark),
               const SizedBox(height: 8),
-              _buildInfoRow('Tomorrow', widget.update.tomorrow,
+              _buildInfoRow('Tomorrow', tomorrow,
                   AppColors.pastelBlue, AppColors.pastelBlueDark),
             ],
             const SizedBox(height: 12),
@@ -278,30 +313,41 @@ class _UpdateCardState extends State<_UpdateCard> {
                 Text(
                   _expanded ? 'Show less' : 'Show more',
                   style: GoogleFonts.inter(
-                    fontSize: 12,
-                    color: AppColors.pastelBlueDark,
-                    fontWeight: FontWeight.w500,
-                  ),
+                      fontSize: 12,
+                      color: AppColors.pastelBlueDark,
+                      fontWeight: FontWeight.w500),
                 ),
                 const Spacer(),
-                if (!widget.update.reviewed)
+                if (!reviewed)
                   GestureDetector(
-                    onTap: () {},
+                    onTap: _marking
+                        ? null
+                        : () async {
+                            setState(() => _marking = true);
+                            await _service.markReviewed(
+                                widget.orgId, u['id'] as String);
+                            if (mounted) setState(() => _marking = false);
+                          },
                     child: Container(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 14, vertical: 6),
                       decoration: BoxDecoration(
-                        color: AppColors.pastelBlueDark,
+                        color: _marking
+                            ? AppColors.pastelBlueDark.withOpacity(0.5)
+                            : AppColors.pastelBlueDark,
                         borderRadius: BorderRadius.circular(8),
                       ),
-                      child: Text(
-                        'Mark Reviewed',
-                        style: GoogleFonts.inter(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.white,
-                        ),
-                      ),
+                      child: _marking
+                          ? const SizedBox(
+                              width: 12,
+                              height: 12,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: Colors.white))
+                          : Text('Mark Reviewed',
+                              style: GoogleFonts.inter(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.white)),
                     ),
                   )
                 else
@@ -310,14 +356,11 @@ class _UpdateCardState extends State<_UpdateCard> {
                       const Icon(Icons.check_circle_rounded,
                           size: 14, color: AppColors.mintDark),
                       const SizedBox(width: 4),
-                      Text(
-                        'Reviewed',
-                        style: GoogleFonts.inter(
-                          fontSize: 12,
-                          color: AppColors.mintDark,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
+                      Text('Reviewed',
+                          style: GoogleFonts.inter(
+                              fontSize: 12,
+                              color: AppColors.mintDark,
+                              fontWeight: FontWeight.w500)),
                     ],
                   ),
               ],
@@ -333,54 +376,23 @@ class _UpdateCardState extends State<_UpdateCard> {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: bg.withOpacity(0.5),
-        borderRadius: BorderRadius.circular(10),
-      ),
+          color: bg.withOpacity(0.5),
+          borderRadius: BorderRadius.circular(10)),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            '$label: ',
-            style: GoogleFonts.inter(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: textColor,
-            ),
-          ),
-          Expanded(
-            child: Text(
-              value,
+          Text('$label: ',
               style: GoogleFonts.inter(
-                fontSize: 12,
-                color: textColor,
-                height: 1.4,
-              ),
-            ),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: textColor)),
+          Expanded(
+            child: Text(value,
+                style: GoogleFonts.inter(
+                    fontSize: 12, color: textColor, height: 1.4)),
           ),
         ],
       ),
     );
   }
-}
-
-class _DailyUpdate {
-  final String name;
-  final String role;
-  final String work;
-  final String blockers;
-  final String tomorrow;
-  final String time;
-  final int streak;
-  final bool reviewed;
-
-  const _DailyUpdate({
-    required this.name,
-    required this.role,
-    required this.work,
-    required this.blockers,
-    required this.tomorrow,
-    required this.time,
-    required this.streak,
-    required this.reviewed,
-  });
 }

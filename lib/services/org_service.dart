@@ -7,10 +7,7 @@ class OrgService {
   final _db = FirebaseFirestore.instance;
   final _auth = FirebaseAuth.instance;
 
-  // ─── Uid getters ──────────────────────────────────────────────────────────
   String? get _uid => _auth.currentUser?.uid;
-
-  // Public getter for join_org_screen to check membership
   String? get currentUid => _uid;
 
   String get _requireUid {
@@ -19,7 +16,6 @@ class OrgService {
     return uid;
   }
 
-  // ─── Generate invite code ─────────────────────────────────────────────────
   String _generateCode() {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     final rand = Random.secure();
@@ -28,7 +24,6 @@ class OrgService {
     return '${code.substring(0, 2)}-${code.substring(2)}';
   }
 
-  // ─── Create organization ──────────────────────────────────────────────────
   Future<String> createOrg({
     required String name,
     required String description,
@@ -65,7 +60,6 @@ class OrgService {
     return orgRef.id;
   }
 
-  // ─── Fetch org by invite code (preview before joining) ───────────────────
   Future<OrganizationModel?> getOrgByCode(String rawCode) async {
     final code = rawCode.trim().toUpperCase();
     final snap = await _db
@@ -77,7 +71,6 @@ class OrgService {
     return OrganizationModel.fromFirestore(snap.docs.first);
   }
 
-  // ─── Join org via invite code ─────────────────────────────────────────────
   Future<String> joinOrgByCode(String rawCode) async {
     final uid = _requireUid;
     final user = _auth.currentUser!;
@@ -134,7 +127,6 @@ class OrgService {
     return orgId;
   }
 
-  // ─── Regenerate invite code ───────────────────────────────────────────────
   Future<String> regenerateCode(String orgId) async {
     final code = _generateCode();
     await _db
@@ -144,7 +136,6 @@ class OrgService {
     return code;
   }
 
-  // ─── Stream all orgs for current user (live) ─────────────────────────────
   Stream<List<OrganizationModel>> streamMyOrgs() {
     final uid = _uid;
     if (uid == null) return Stream.value([]);
@@ -169,7 +160,6 @@ class OrgService {
     });
   }
 
-  // ─── One-time fetch of orgs ───────────────────────────────────────────────
   Future<List<OrganizationModel>> getMyOrgs() async {
     final uid = _uid;
     if (uid == null) return [];
@@ -189,7 +179,6 @@ class OrgService {
         .toList();
   }
 
-  // ─── Stream members of an org ─────────────────────────────────────────────
   Stream<List<OrgMember>> streamMembers(String orgId) {
     return _db
         .collection('organizations')
@@ -200,7 +189,6 @@ class OrgService {
         .map((s) => s.docs.map((d) => OrgMember.fromFirestore(d)).toList());
   }
 
-  // ─── Remove a member ─────────────────────────────────────────────────────
   Future<void> removeMember(String orgId, String memberId) async {
     await _db
         .collection('organizations')
@@ -220,14 +208,12 @@ class OrgService {
         .update({'orgs': FieldValue.arrayRemove([orgId])});
   }
 
-  // ─── Get single org ───────────────────────────────────────────────────────
   Future<OrganizationModel?> getOrg(String orgId) async {
     final doc = await _db.collection('organizations').doc(orgId).get();
     if (!doc.exists) return null;
     return OrganizationModel.fromFirestore(doc);
   }
 
-  // ─── Get user role in org ─────────────────────────────────────────────────
   Future<String?> getUserRole(String orgId) async {
     final uid = _uid;
     if (uid == null) return null;
@@ -239,5 +225,39 @@ class OrgService {
         .get();
     if (!doc.exists) return null;
     return (doc.data() as Map<String, dynamic>)['role'] as String?;
+  }
+
+  // ─── Save office location ─────────────────────────────────────────────────
+  Future<void> saveOfficeLocation({
+    required String orgId,
+    required double latitude,
+    required double longitude,
+    required double radiusMeters,
+    String? address,                              // ✅ added
+  }) async {
+    await _db
+        .collection('organizations')
+        .doc(orgId)
+        .collection('settings')
+        .doc('location')
+        .set({
+      'latitude': latitude,
+      'longitude': longitude,
+      'radiusMeters': radiusMeters,
+      'address': address ?? '',                   // ✅ saved to Firestore
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  // ─── Fetch office location ────────────────────────────────────────────────
+  Future<Map<String, dynamic>?> getOfficeLocation(String orgId) async {
+    final doc = await _db
+        .collection('organizations')
+        .doc(orgId)
+        .collection('settings')
+        .doc('location')
+        .get();
+    if (!doc.exists) return null;
+    return doc.data();
   }
 }

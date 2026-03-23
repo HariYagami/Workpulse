@@ -2,10 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
 import '../models/organization_model.dart';
+import '../services/updates_service.dart';
 
 class StaffUpdatesScreen extends StatefulWidget {
   final OrganizationModel org;
-  const StaffUpdatesScreen({super.key, required this.org});
+
+  const StaffUpdatesScreen({
+    super.key,
+    required this.org,
+  });
 
   @override
   State<StaffUpdatesScreen> createState() => _StaffUpdatesScreenState();
@@ -14,53 +19,45 @@ class StaffUpdatesScreen extends StatefulWidget {
 class _StaffUpdatesScreenState extends State<StaffUpdatesScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
+  final _service = UpdatesService();
 
-  // Controllers for "My Update" form
   final _workCtrl = TextEditingController();
   final _blockersCtrl = TextEditingController();
   final _tomorrowCtrl = TextEditingController();
+
   bool _submitted = false;
   bool _submitting = false;
-
-  // Mock org updates — replace with:
-  // StreamProvider listening to organizations/{orgId}/updates
-  final List<_OrgUpdate> _orgUpdates = [
-    _OrgUpdate(
-      name: 'Arjun K',
-      role: 'Designer',
-      work: 'Finished mockups for the onboarding screen redesign. Working on the component library.',
-      blockers: 'Waiting for final brand colors from client.',
-      tomorrow: 'Start on settings screen mockups.',
-      time: '6:10 PM',
-      streak: 5,
-      isMe: false,
-    ),
-    _OrgUpdate(
-      name: 'Priya M',
-      role: 'Developer',
-      work: 'Completed the login screen and auth flow. Unit tests passing.',
-      blockers: 'None',
-      tomorrow: 'Start on main dashboard UI.',
-      time: '5:58 PM',
-      streak: 8,
-      isMe: false,
-    ),
-    _OrgUpdate(
-      name: 'Rahul T',
-      role: 'Backend Dev',
-      work: 'Fixed Firestore security rules bug. Wrote API docs for the attendance endpoint.',
-      blockers: 'None',
-      tomorrow: 'Work on push notification Cloud Function.',
-      time: '5:45 PM',
-      streak: 12,
-      isMe: false,
-    ),
-  ];
+  bool _loadingState = true;
+  int _myStreak = 0;
+  String _staffName = '';
+  String _staffRole = '';
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    _init();
+  }
+
+  Future<void> _init() async {
+    // Fetch name and role from Firestore users collection
+    final details = await _service.getCurrentUserDetails();
+    _staffName = details['name'] ?? '';
+    _staffRole = details['role'] ?? '';
+
+    // Check if already submitted today
+    final existing = await _service.getMyTodayUpdate(widget.org.id);
+    if (existing != null) {
+      _workCtrl.text = existing['work'] ?? '';
+      _blockersCtrl.text = existing['blockers'] ?? '';
+      _tomorrowCtrl.text = existing['tomorrow'] ?? '';
+      _myStreak = (existing['streak'] ?? 0) as int;
+      // Use saved name/role if local fetch returned empty
+      if (_staffName.isEmpty) _staffName = existing['name'] ?? '';
+      if (_staffRole.isEmpty) _staffRole = existing['role'] ?? '';
+      setState(() => _submitted = true);
+    }
+    setState(() => _loadingState = false);
   }
 
   @override
@@ -75,29 +72,44 @@ class _StaffUpdatesScreenState extends State<StaffUpdatesScreen>
   Future<void> _submitUpdate() async {
     if (_workCtrl.text.trim().isEmpty) return;
     setState(() => _submitting = true);
-    // TODO: Replace with UpdatesService().submitUpdate(
-    //   orgId: widget.org.id,
-    //   work: _workCtrl.text.trim(),
-    //   blockers: _blockersCtrl.text.trim(),
-    //   tomorrow: _tomorrowCtrl.text.trim(),
-    // )
-    await Future.delayed(const Duration(milliseconds: 900));
-    setState(() {
-      _submitted = true;
-      _submitting = false;
-    });
+    try {
+      await _service.submitUpdate(
+        orgId: widget.org.id,
+        work: _workCtrl.text.trim(),
+        blockers: _blockersCtrl.text.trim().isEmpty
+            ? 'None'
+            : _blockersCtrl.text.trim(),
+        tomorrow: _tomorrowCtrl.text.trim(),
+        name: _staffName,
+        role: _staffRole,
+      );
+      setState(() {
+        _submitted = true;
+        _submitting = false;
+      });
+    } catch (e) {
+      setState(() => _submitting = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to submit: $e')),
+        );
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_loadingState) {
+      return const Center(child: CircularProgressIndicator());
+    }
     return SafeArea(
       child: Column(
         children: [
           _buildHeader(),
           TabBar(
             controller: _tabController,
-            labelStyle: GoogleFonts.inter(
-                fontSize: 13, fontWeight: FontWeight.w600),
+            labelStyle:
+                GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600),
             unselectedLabelStyle:
                 GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w400),
             labelColor: AppColors.mintDark,
@@ -163,7 +175,7 @@ class _StaffUpdatesScreenState extends State<StaffUpdatesScreen>
           const Icon(Icons.local_fire_department_rounded,
               size: 14, color: AppColors.peachDark),
           const SizedBox(width: 4),
-          Text('5-day streak',
+          Text('$_myStreak-day streak',
               style: GoogleFonts.inter(
                 fontSize: 11,
                 fontWeight: FontWeight.w600,
@@ -174,7 +186,7 @@ class _StaffUpdatesScreenState extends State<StaffUpdatesScreen>
     );
   }
 
-  // ─── My Update Tab ─────────────────────────────────────────────────────────
+  // ─── My Update Tab ──────────────────────────────────────────────────────────
 
   Widget _buildMyUpdateTab() {
     if (_submitted) return _buildSubmittedState();
@@ -227,7 +239,8 @@ class _StaffUpdatesScreenState extends State<StaffUpdatesScreen>
                       child: CircularProgressIndicator(
                           strokeWidth: 2.5, color: Colors.white))
                   : const Icon(Icons.send_rounded, size: 18),
-              label: Text(_submitting ? 'Submitting...' : 'Submit Today\'s Update'),
+              label: Text(
+                  _submitting ? 'Submitting...' : 'Submit Today\'s Update'),
               onPressed: _submitting ? null : _submitUpdate,
             ),
           ),
@@ -235,8 +248,8 @@ class _StaffUpdatesScreenState extends State<StaffUpdatesScreen>
           Center(
             child: Text(
               'Updates are visible to your admin and team.',
-              style: GoogleFonts.inter(
-                  fontSize: 12, color: AppColors.textHint),
+              style:
+                  GoogleFonts.inter(fontSize: 12, color: AppColors.textHint),
             ),
           ),
         ],
@@ -246,9 +259,16 @@ class _StaffUpdatesScreenState extends State<StaffUpdatesScreen>
 
   Widget _buildTodayBanner() {
     final now = DateTime.now();
-    final dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-    final monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    final dayStr = '${dayNames[now.weekday - 1]}, ${now.day} ${monthNames[now.month - 1]}';
+    final dayNames = [
+      'Monday', 'Tuesday', 'Wednesday', 'Thursday',
+      'Friday', 'Saturday', 'Sunday'
+    ];
+    final monthNames = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+    ];
+    final dayStr =
+        '${dayNames[now.weekday - 1]}, ${now.day} ${monthNames[now.month - 1]}';
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -371,20 +391,11 @@ class _StaffUpdatesScreenState extends State<StaffUpdatesScreen>
               'Your admin and teammates can now see your update for today.',
               textAlign: TextAlign.center,
               style: GoogleFonts.inter(
-                  fontSize: 14,
-                  color: AppColors.textSecondary,
-                  height: 1.6),
+                  fontSize: 14, color: AppColors.textSecondary, height: 1.6),
             ),
             const SizedBox(height: 28),
             OutlinedButton(
-              onPressed: () {
-                setState(() {
-                  _submitted = false;
-                  _workCtrl.clear();
-                  _blockersCtrl.clear();
-                  _tomorrowCtrl.clear();
-                });
-              },
+              onPressed: () => setState(() => _submitted = false),
               style: OutlinedButton.styleFrom(
                 side: const BorderSide(color: AppColors.border),
                 shape: RoundedRectangleBorder(
@@ -404,37 +415,48 @@ class _StaffUpdatesScreenState extends State<StaffUpdatesScreen>
   // ─── Team Updates Tab ───────────────────────────────────────────────────────
 
   Widget _buildTeamUpdatesTab() {
-    if (_orgUpdates.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+    return StreamBuilder<List<Map<String, dynamic>>>(
+      stream: _service.streamTodayUpdates(widget.org.id),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final updates = snapshot.data ?? [];
+        if (updates.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.people_outline_rounded,
+                    size: 44, color: AppColors.textHint),
+                const SizedBox(height: 12),
+                Text('No updates yet today',
+                    style: GoogleFonts.inter(
+                        fontSize: 14, color: AppColors.textSecondary)),
+              ],
+            ),
+          );
+        }
+        return ListView(
+          physics: const BouncingScrollPhysics(),
+          padding: const EdgeInsets.all(24),
           children: [
-            Icon(Icons.people_outline_rounded,
-                size: 44, color: AppColors.textHint),
-            const SizedBox(height: 12),
-            Text('No updates yet today',
-                style: GoogleFonts.inter(
-                    fontSize: 14, color: AppColors.textSecondary)),
+            _buildTeamSummary(updates.length),
+            const SizedBox(height: 16),
+            ...updates.map((u) => Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: _TeamUpdateCard(
+                    update: u,
+                    currentUid: _service.currentUid,
+                  ),
+                )),
           ],
-        ),
-      );
-    }
-
-    return ListView(
-      physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.all(24),
-      children: [
-        _buildTeamSummary(),
-        const SizedBox(height: 16),
-        ..._orgUpdates.map((u) => Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: _TeamUpdateCard(update: u),
-            )),
-      ],
+        );
+      },
     );
   }
 
-  Widget _buildTeamSummary() {
+  Widget _buildTeamSummary(int count) {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -447,7 +469,7 @@ class _StaffUpdatesScreenState extends State<StaffUpdatesScreen>
               size: 18, color: AppColors.mintDark),
           const SizedBox(width: 10),
           Text(
-            '${_orgUpdates.length} of ${widget.org.memberCount} teammates submitted today',
+            '$count of ${widget.org.memberCount} teammates submitted today',
             style: GoogleFonts.inter(
               fontSize: 13,
               fontWeight: FontWeight.w500,
@@ -463,8 +485,9 @@ class _StaffUpdatesScreenState extends State<StaffUpdatesScreen>
 // ─── Team Update Card ─────────────────────────────────────────────────────────
 
 class _TeamUpdateCard extends StatefulWidget {
-  final _OrgUpdate update;
-  const _TeamUpdateCard({required this.update});
+  final Map<String, dynamic> update;
+  final String currentUid;
+  const _TeamUpdateCard({required this.update, required this.currentUid});
 
   @override
   State<_TeamUpdateCard> createState() => _TeamUpdateCardState();
@@ -476,14 +499,40 @@ class _TeamUpdateCardState extends State<_TeamUpdateCard> {
   @override
   Widget build(BuildContext context) {
     final u = widget.update;
+    final uid = (u['uid'] ?? '') as String;
+    final isMe = uid == widget.currentUid;
+    final name = isMe ? 'You' : (u['name'] ?? '?') as String;
+    final displayName = (u['name'] ?? '?') as String;
+    final role = (u['role'] ?? '') as String;
+    final work = (u['work'] ?? '') as String;
+    final blockers = (u['blockers'] ?? 'None') as String;
+    final tomorrow = (u['tomorrow'] ?? '') as String;
+    final streak = (u['streak'] ?? 0) as int;
+    final ts = u['submittedAt'];
+    final time = ts != null
+        ? TimeOfDay.fromDateTime((ts as dynamic).toDate()).format(context)
+        : '';
+
+    // Avatar initials: always use actual name, not "You"
+    final initials = displayName.isNotEmpty
+        ? (displayName.length >= 2
+            ? displayName.substring(0, 2)
+            : displayName)
+            .toUpperCase()
+        : '?';
+
     return GestureDetector(
       onTap: () => setState(() => _expanded = !_expanded),
       child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: AppColors.white,
+          color: isMe ? AppColors.mint.withOpacity(0.15) : AppColors.white,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: AppColors.border),
+          border: Border.all(
+            color: isMe
+                ? AppColors.mintDark.withOpacity(0.3)
+                : AppColors.border,
+          ),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -494,16 +543,18 @@ class _TeamUpdateCardState extends State<_TeamUpdateCard> {
                   width: 38,
                   height: 38,
                   decoration: BoxDecoration(
-                    color: AppColors.lavender,
+                    color: isMe ? AppColors.mint : AppColors.lavender,
                     borderRadius: BorderRadius.circular(11),
                   ),
                   child: Center(
                     child: Text(
-                      u.name.substring(0, 2).toUpperCase(),
+                      initials,
                       style: GoogleFonts.inter(
                         fontSize: 13,
                         fontWeight: FontWeight.w700,
-                        color: AppColors.lavenderDark,
+                        color: isMe
+                            ? AppColors.mintDark
+                            : AppColors.lavenderDark,
                       ),
                     ),
                   ),
@@ -513,13 +564,32 @@ class _TeamUpdateCardState extends State<_TeamUpdateCard> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(u.name,
-                          style: GoogleFonts.inter(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.textPrimary,
-                          )),
-                      Text(u.role,
+                      Row(
+                        children: [
+                          Text(name,
+                              style: GoogleFonts.inter(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.textPrimary)),
+                          if (isMe) ...[
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: AppColors.mintDark.withOpacity(0.12),
+                                borderRadius: BorderRadius.circular(5),
+                              ),
+                              child: Text('you',
+                                  style: GoogleFonts.inter(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w600,
+                                      color: AppColors.mintDark)),
+                            ),
+                          ],
+                        ],
+                      ),
+                      Text(role,
                           style: GoogleFonts.inter(
                               fontSize: 11,
                               color: AppColors.textSecondary)),
@@ -534,16 +604,15 @@ class _TeamUpdateCardState extends State<_TeamUpdateCard> {
                         const Icon(Icons.local_fire_department_rounded,
                             size: 11, color: AppColors.peachDark),
                         const SizedBox(width: 2),
-                        Text('${u.streak}d',
+                        Text('${streak}d',
                             style: GoogleFonts.inter(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.peachDark,
-                            )),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.peachDark)),
                       ],
                     ),
                     const SizedBox(height: 2),
-                    Text(u.time,
+                    Text(time,
                         style: GoogleFonts.inter(
                             fontSize: 10, color: AppColors.textHint)),
                   ],
@@ -551,31 +620,28 @@ class _TeamUpdateCardState extends State<_TeamUpdateCard> {
               ],
             ),
             const SizedBox(height: 10),
-            Text(
-              u.work,
-              style: GoogleFonts.inter(
-                  fontSize: 13,
-                  color: AppColors.textSecondary,
-                  height: 1.5),
-              maxLines: _expanded ? null : 2,
-              overflow: _expanded ? null : TextOverflow.ellipsis,
-            ),
+            Text(work,
+                style: GoogleFonts.inter(
+                    fontSize: 13,
+                    color: AppColors.textSecondary,
+                    height: 1.5),
+                maxLines: _expanded ? null : 2,
+                overflow: _expanded ? null : TextOverflow.ellipsis),
             if (_expanded) ...[
               const SizedBox(height: 10),
-              _infoChip('Blockers', u.blockers, AppColors.peach,
+              _infoChip('Blockers', blockers, AppColors.peach,
                   AppColors.peachDark),
               const SizedBox(height: 6),
-              _infoChip('Tomorrow', u.tomorrow, AppColors.pastelBlue,
+              _infoChip('Tomorrow', tomorrow, AppColors.pastelBlue,
                   AppColors.pastelBlueDark),
             ],
             const SizedBox(height: 8),
             Text(
               _expanded ? 'Show less' : 'Show more',
               style: GoogleFonts.inter(
-                fontSize: 12,
-                color: AppColors.pastelBlueDark,
-                fontWeight: FontWeight.w500,
-              ),
+                  fontSize: 12,
+                  color: AppColors.pastelBlueDark,
+                  fontWeight: FontWeight.w500),
             ),
           ],
         ),
@@ -583,15 +649,13 @@ class _TeamUpdateCardState extends State<_TeamUpdateCard> {
     );
   }
 
-  Widget _infoChip(
-      String label, String value, Color bg, Color textColor) {
+  Widget _infoChip(String label, String value, Color bg, Color textColor) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
       decoration: BoxDecoration(
-        color: bg.withOpacity(0.5),
-        borderRadius: BorderRadius.circular(9),
-      ),
+          color: bg.withOpacity(0.5),
+          borderRadius: BorderRadius.circular(9)),
       child: RichText(
         text: TextSpan(
           style: GoogleFonts.inter(fontSize: 12, color: textColor),
@@ -605,23 +669,4 @@ class _TeamUpdateCardState extends State<_TeamUpdateCard> {
       ),
     );
   }
-}
-
-// ─── Data model ────────────────────────────────────────────────────────────
-
-class _OrgUpdate {
-  final String name, role, work, blockers, tomorrow, time;
-  final int streak;
-  final bool isMe;
-
-  const _OrgUpdate({
-    required this.name,
-    required this.role,
-    required this.work,
-    required this.blockers,
-    required this.tomorrow,
-    required this.time,
-    required this.streak,
-    required this.isMe,
-  });
 }
